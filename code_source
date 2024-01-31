@@ -1,0 +1,230 @@
+import networkx as nx
+import matplotlib.pyplot as plt
+from tkinter import Tk, Label, Listbox, Button, StringVar, messagebox, Toplevel, ttk
+import tkinter as tk
+
+class GrapheGuadeloupe:
+    def _init_(self):
+        self.graph = nx.DiGraph()
+
+    def ajouter_communes(self, communes):
+        for commune, coordonnees in communes.items():
+            self.graph.add_node(commune, pos=coordonnees)
+
+    def ajouter_liaisons(self, liaisons):
+        for liaison in liaisons:
+            commune1, commune2, distance = liaison
+            self.graph.add_edge(commune1, commune2, distance=float(distance))
+            self.graph.add_edge(commune2, commune1, distance=float(distance))
+
+    def afficher_graphe(self, commune_selectionnee=None, communes_selectionnees=None):
+        pos = nx.get_node_attributes(self.graph, 'pos')
+        edge_labels = {(edge[0], edge[1]): f"{edge[2]['distance']} km" for edge in self.graph.edges(data=True)}
+
+        node_colors = ['red' if node == commune_selectionnee else 'orange' if node in communes_selectionnees else 'skyblue'
+                       for node in self.graph.nodes()]
+
+        plt.figure(figsize=(12, 9))
+        nx.draw(self.graph, pos, with_labels=True, node_size=1000, node_color=node_colors, font_size=10,
+                font_color='black', font_weight='bold', edge_color='gray', font_family='sans-serif',
+                connectionstyle="arc3,rad=0.1", arrows=True, arrowsize=20, arrowstyle='->', edgecolors='black')
+
+        nx.draw_networkx_edge_labels(self.graph, pos, edge_labels=edge_labels)
+        plt.show()
+
+class InterfaceUtilisateur:
+    def _init_(self, fenetre, graphe):
+        self.fenetre = fenetre
+        self.fenetre.title("Sélection de Commune")
+        self.graphe = graphe
+
+        self.label = Label(fenetre, text="Sélectionnez une commune comme point de départ:", font=("Helvetica", 14))
+        self.label.pack(pady=10)
+
+        self.liste_communes = Listbox(fenetre, selectmode="single", font=("Helvetica", 12), height=15)
+        for commune in graphe.graph.nodes():
+            self.liste_communes.insert('end', commune)
+        self.liste_communes.pack(pady=10)
+
+        self.commune_selectionnee = None
+        self.bouton_valider = Button(fenetre, text="Valider", command=self.valider_commune, font=("Helvetica", 12))
+        self.bouton_valider.pack(pady=10)
+
+    def valider_commune(self):
+        self.commune_selectionnee = self.liste_communes.get(self.liste_communes.curselection())
+        if self.commune_selectionnee:
+            self.ouvrir_fenetre_selection()
+        else:
+            messagebox.showwarning("Erreur", "Veuillez sélectionner une commune.")
+
+    def ouvrir_fenetre_selection(self):
+        fenetre_selection = Toplevel(self.fenetre)
+        fenetre_selection.title("Sélection des communes suivantes")
+
+        label_selection = Label(fenetre_selection, text="Sélectionnez les autres communes:", font=("Helvetica", 14))
+        label_selection.pack(pady=10)
+
+        liste_communes_selection = Listbox(fenetre_selection, selectmode="multiple", font=("Helvetica", 12), height=15)
+        for commune in self.graphe.graph.nodes():
+            if commune != self.commune_selectionnee:
+                liste_communes_selection.insert('end', commune)
+        liste_communes_selection.pack(pady=10)
+
+        bouton_valider_selection = Button(fenetre_selection, text="Valider",
+                                          command=lambda: self.valider_selection(liste_communes_selection),
+                                          font=("Helvetica", 12))
+        bouton_valider_selection.pack(pady=10)
+
+    def valider_selection(self, liste_communes_selection):
+        communes_selectionnees = [liste_communes_selection.get(i) for i in liste_communes_selection.curselection()]
+
+        if len(communes_selectionnees) <= 6:
+            if len(communes_selectionnees) == 0:
+                messagebox.showwarning("Erreur", "Veuillez sélectionner au moins une commune.")
+            else:
+                self.graphe.afficher_graphe(self.commune_selectionnee, communes_selectionnees)
+
+                # Utilisez la méthode de l'objet InterfaceUtilisateur
+                self.afficher_tableau_chemin(self.commune_selectionnee, communes_selectionnees)
+        else:
+            messagebox.showwarning("Erreur", "Veuillez sélectionner au maximum 6 communes.")
+
+    def afficher_tableau_chemin(self, commune_depart, communes_selectionnees):
+        fenetre_tableau = Toplevel(self.fenetre)
+        fenetre_tableau.title("Tableau du chemin le plus court")
+
+        tableau = ttk.Treeview(fenetre_tableau)
+        tableau["columns"] = ("Communes Visitées", "Distance")
+
+        tableau.heading("Communes Visitées", text="Communes Visitées", anchor="center")
+        tableau.heading("Distance", text="Distance", anchor="center")
+
+        # Initialiser le chemin avec la commune de départ
+        chemin_aller = [commune_depart]
+        distance_totale_aller = 0
+
+        # Itérer sur chaque commune sélectionnée pour construire le chemin aller
+        for commune_arrivee in communes_selectionnees:
+            if commune_arrivee != commune_depart:
+                # Utiliser l'algorithme de Dijkstra pour trouver le chemin le plus court aller
+                path_aller = nx.shortest_path(self.graphe.graph, source=chemin_aller[-1], target=commune_arrivee,
+                                              weight='distance')
+
+                # Ajouter le chemin aller et la distance aller à la liste
+                for i in range(len(path_aller) - 1):
+                    depart = path_aller[i]
+                    arrivee = path_aller[i + 1]
+                    distance = self.graphe.graph[depart][arrivee]['distance']
+                    tableau.insert("", "end", values=(depart, f"{distance} km"))
+                    chemin_aller.extend(path_aller[1:])
+
+                # Ajouter la distance du chemin aller
+                distance_totale_aller += sum(
+                    self.graphe.graph[path_aller[i]][path_aller[i + 1]]['distance'] for i in range(len(path_aller) - 1))
+
+        # Utiliser l'algorithme de Dijkstra pour trouver le chemin le plus court retour
+        path_retour = nx.shortest_path(self.graphe.graph, source=chemin_aller[-1], target=commune_depart,
+                                       weight='distance')
+
+        # Ajouter le chemin retour et la distance retour à la liste
+        for j in range(len(path_retour) - 1):
+            depart = path_retour[j]
+            arrivee = path_retour[j + 1]
+            distance_retour = self.graphe.graph[depart][arrivee]['distance']
+            tableau.insert("", "end", values=(depart, f"{distance_retour} km"))
+            chemin_aller.extend(path_retour[1:])
+
+        # Ajouter la distance du chemin retour
+        distance_totale_retour = sum(
+            self.graphe.graph[path_retour[j]][path_retour[j + 1]]['distance'] for j in range(len(path_retour) - 1))
+
+        # Insérer le chemin complet aller-retour et la distance totale
+        tableau.insert("", "end", values=("Chemin Aller-Retour", ""))
+        tableau.insert("", "end", values=("Distance totale Aller", f"{distance_totale_aller} km"))
+        tableau.insert("", "end", values=("Distance totale Retour", f"{distance_totale_retour} km"))
+
+        # Ajustements visuels
+        tableau.column("#0", stretch=tk.NO, width=1)  # Désactive la première colonne (inutile)
+        tableau.column("Communes Visitées", anchor="center", width=200)
+        tableau.column("Distance", anchor="center", width=120)
+
+        tableau.pack(padx=20, pady=20, fill="both", expand=True)
+
+if _name_ == "_main_":
+    guadeloupe = GrapheGuadeloupe()
+
+    coordonnees_communes = {
+        'Sainte-rose': (15.999, -61.1655),
+        'Deshaies': (15.8544, -61.2756),
+        'Pointe-Noire': (15.8522, -61.3823),
+        'Bouillante': (15.8544, -61.4709),
+        'Vieux-Habitants': (15.8583, -61.5490),
+        'Baillif': (15.8622, -61.6197),
+        'Basse-Terre': (15.8731, -61.6844),
+        'Saint-Claude': (15.9888, -61.6124),
+        'Gourbeyre': (15.9919, -61.6756),
+        'Vieux-Fort': (15.9220, -61.7456),
+        'Trois-Rivières': (16.0167, -61.7937),
+        'Capesterre': (16.1254, -61.7370),
+        'Goyave': (16.1549, -61.6654),
+        'Petit-Bourg': (16.1565, -61.5727),
+        'Baie-Mahault': (16.253, -61.3440),
+        'Les Abymes': (16.384, -61.4124),
+        'Pointe-à-Pitre': (16.3436, -61.5553),
+        'Le Gosier': (16.5098, -61.6039),
+        'Sainte-Anne': (16.6810, -61.6373),
+        'Saint-François': (16.9003, -61.6365),
+        'Le Moule': (16.801, -61.4763),
+        'Anse-Bertrand': (16.636, -61.1305),
+        'Port-Louis': (16.546, -61.2112),
+        'Petit-Canal': (16.503, -61.3073),
+        'Morne-à-L eau': (16.527, -61.3831),
+        'Lamentin': (16.151, -61.2574),
+    }
+
+    liaisons = [
+        ('Sainte-rose', 'Lamentin', 13),
+        ('Lamentin', 'Baie-Mahault', 8),
+        ('Les Abymes', 'Morne-à-L eau', 9),
+        ('Morne-à-L eau', 'Port-Louis', 17),
+        ('Port-Louis', 'Anse-Bertrand', 8),
+        ('Anse-Bertrand', 'Le Moule', 28),
+        ('Le Moule', 'Saint-François', 14),
+        ('Saint-François', 'Sainte-Anne', 15),
+        ('Sainte-Anne', 'Le Gosier', 15),
+        ('Le Gosier', 'Pointe-à-Pitre', 8),
+        ('Petit-Bourg', 'Goyave', 7),
+        ('Goyave', 'Capesterre', 13),
+        ('Capesterre', 'Trois-Rivières', 15),
+        ('Trois-Rivières', 'Vieux-Fort', 9),
+        ('Saint-Claude', 'Basse-Terre', 6),
+        ('Basse-Terre', 'Baillif', 4),
+        ('Baillif', 'Vieux-Habitants', 7),
+        ('Vieux-Habitants', 'Bouillante', 12),
+        ('Bouillante', 'Pointe-Noire', 15),
+        ('Pointe-Noire', 'Deshaies', 13),
+        ('Deshaies', 'Sainte-rose', 15),
+        ('Pointe-Noire', 'Petit-Bourg', 35),
+        ('Basse-Terre', 'Vieux-Fort', 9),
+        ('Basse-Terre', 'Gourbeyre', 7),
+        ('Baie-Mahault', 'Les Abymes', 13),
+        ('Les Abymes', 'Pointe-à-Pitre', 6),
+        ('Sainte-Anne', 'Le Moule', 15),
+        ('Le Moule', 'Morne-à-L eau', 14),
+        ('Petit-Canal', 'Morne-à-L eau', 9),
+        ('Petit-Canal', 'Port-Louis', 9),
+        ('Petit-Canal', 'Le Moule', 18),
+        ('Gourbeyre', 'Trois-Rivières', 9),
+        ('Petit-Bourg', 'Baie-Mahault', 11),
+    ]
+
+    guadeloupe.ajouter_communes(coordonnees_communes)
+    guadeloupe.ajouter_liaisons(liaisons)
+
+    fenetre_principale = Tk()
+    fenetre_principale.geometry("1200x500")
+
+    # Passez l'objet guadeloupe à la classe InterfaceUtilisateur
+    interface = InterfaceUtilisateur(fenetre_principale, guadeloupe)
+
+    fenetre_principale.mainloop()
